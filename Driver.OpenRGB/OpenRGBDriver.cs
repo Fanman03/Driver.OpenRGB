@@ -1,11 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Net.Mime;
+using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using System.Timers;
+using Newtonsoft.Json;
 using OpenRGB.NET;
 using OpenRGB.NET.Models;
 using SimpleLed;
+using Color = OpenRGB.NET.Models.Color;
+using Image = System.Drawing.Image;
+using Timer = System.Timers.Timer;
 
 namespace Driver.OpenRGB
 {
@@ -15,6 +27,10 @@ namespace Driver.OpenRGB
         public event Events.DeviceChangeEventHandler DeviceRemoved;
         public OpenRGBClient client;
 
+        public static Assembly myAssembly = Assembly.GetExecutingAssembly();
+        public static Stream orgbImage = myAssembly.GetManifestResourceStream("Driver.OpenRGB.ORGB.png");
+
+
         public void Configure(DriverDetails driverDetails)
         {
             client = new OpenRGBClient(name: "RGB Sync Studio", autoconnect: true, timeout: 1000);
@@ -22,18 +38,20 @@ namespace Driver.OpenRGB
             var deviceCount = client.GetControllerCount();
             var devices = client.GetAllControllerData();
 
-            foreach (Device orgbDevice in devices)
+            for (int devId = 0; devId < devices.Length; devId++)
             {
-                ControlDevice slsDevice = new ControlDevice();
+                ORGBControlDevice slsDevice = new ORGBControlDevice();
+                slsDevice.id = devId;
                 slsDevice.Driver = this;
-                slsDevice.Name = orgbDevice.Name;
-                slsDevice.DeviceType = DeviceTypeConverter.GetType(orgbDevice.Type);
+                slsDevice.Name = devices[devId].Name;
+                slsDevice.DeviceType = DeviceTypeConverter.GetType(devices[devId].Type);
                 slsDevice.Has2DSupport = false;
+                slsDevice.ProductImage = (Bitmap)Image.FromStream(orgbImage);
 
                 List<ControlDevice.LedUnit> deviceLeds = new List<ControlDevice.LedUnit>();
 
                 int i = 0;
-                foreach (Led orgbLed in orgbDevice.Leds)
+                foreach (Led orgbLed in devices[devId].Leds)
                 {
                     ControlDevice.LedUnit slsLed = new ControlDevice.LedUnit();
                     slsLed.LEDName = orgbLed.Name;
@@ -90,15 +108,22 @@ namespace Driver.OpenRGB
 
         public void Push(ControlDevice controlDevice)
         {
-            foreach (ControlDevice.LedUnit slsLED in controlDevice.LEDs)
-            {
-                //TODO figure out how to update LED color
-            }
+            ORGBControlDevice orgbControlDevice = controlDevice as ORGBControlDevice;
+            Device orgbDevice = client.GetAllControllerData().First(dev => dev.Name == controlDevice.Name);
+            var leds = Enumerable.Range(0, orgbDevice.Colors.Length)
+                .Select(_ => new Color((byte) controlDevice.LEDs[0].Color.Red, (byte)controlDevice.LEDs[0].Color.Green, (byte)controlDevice.LEDs[0].Color.Blue))
+                .ToArray();
+            client.UpdateLeds(orgbControlDevice.id, leds);
         }
 
         public void PutConfig<T>(T config) where T : SLSConfigData
         {
             throw new NotImplementedException();
+        }
+
+        public class ORGBControlDevice : ControlDevice
+        {
+            public int id { get; set; }
         }
     }
 }
